@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 //
 // Interfaces to get memory pages from OS
@@ -24,6 +25,7 @@ void munmap_to_system(void *ptr, size_t size);
 //
 // Struct definitions
 //
+// metadataにBinsize覚えさせよう
 
 typedef struct my_metadata_t {
   size_t size;
@@ -40,20 +42,24 @@ typedef struct my_heap_t {
 //
 // Static variables (DO NOT ADD ANOTHER STATIC VARIABLES!)
 //
-my_heap_t my_heap[16];
+my_heap_t my_heap[12];
 //
 // Helper functions (feel free to add/remove/edit!)
 //
 
-int difine_bin_from_size(size_t *size)
+int exponentiation_list[13] = {0,2,4,8,16,32,64,128,256,512,1024,2048,4096};
+
+
+    // 遅いから小さいサイズを細かくチェック
+int define_bin_from_size(size_t size)
 {
-  int res;
-  for (int i = 0;i < 16; i++){
-    if (i*256 <= size && size < (i+1)*256){
-      res = i;
+  for (int i = 0;i < 12; i++){
+    if (exponentiation_list[i] <= size && size < exponentiation_list[i+1])
+    {
+      return i;
     }
   }
-  return res;
+  return 11;
 }
 
 void my_add_to_free_list(my_metadata_t *metadata) {
@@ -78,10 +84,12 @@ void my_remove_from_free_list(my_metadata_t *metadata, my_metadata_t *prev, my_h
 
 // This is called at the beginning of each challenge.
 void my_initialize() {
-  for(int i=0;i<16;i++){
+  for(int i=0;i<12;i++){
     my_heap[i].free_head = &my_heap[i].dummy;
     my_heap[i].dummy.size = 0;
+    my_heap[i].dummy.bin_size = i;
     my_heap[i].dummy.next = NULL;
+    printf("inited my_heap %d\n", my_heap[i].dummy.bin_size);
     }
 }
 
@@ -90,17 +98,21 @@ void my_initialize() {
 // 4000. You are not allowed to use any library functions other than
 // mmap_from_system() / munmap_to_system().
 void *my_malloc(size_t size) {
-  int bin_size = difine_bin_from_size(&size);
+  int bin_size = define_bin_from_size(size);
   my_metadata_t *metadata = my_heap[bin_size].free_head;
   my_metadata_t *prev = NULL;
 
-  // best fit
-  // Select the smallest difference
   my_metadata_t *best_prev = NULL;
   my_metadata_t *best_metadata = NULL;
+
+  printf("want bin is :%d and size: %zu\n", bin_size, size);
+  // best fit
+  // Select the smallest difference
+
   while (metadata)
   {
     if (size <= metadata->size){
+        printf("wo");
       if (!best_metadata ||  best_metadata->size > metadata->size)
       {
         best_prev=prev;
@@ -109,10 +121,15 @@ void *my_malloc(size_t size) {
     }
     prev = metadata;
     metadata = metadata->next;
+    printf("=========Change==========");
+    if (!metadata && metadata->bin_size < 12){
+      bin_size++;
+      metadata = my_heap[bin_size].free_head;
+      prev = NULL;
+      printf("up size :%d",bin_size);
+    }
   }
 
-  metadata = best_metadata;
-  prev = best_prev;
   // now, metadata points to the first free slot
   // and prev is the previous entry.
 
@@ -128,7 +145,7 @@ void *my_malloc(size_t size) {
     size_t buffer_size = 4096;
     my_metadata_t *metadata = (my_metadata_t *)mmap_from_system(buffer_size);
     metadata->size = buffer_size - sizeof(my_metadata_t);
-    metadata->bin_size = difine_bin_from_size(&metadata->size);
+    metadata->bin_size = define_bin_from_size(metadata->size);
     metadata->next = NULL;
     // Add the memory region to the free list.
     my_add_to_free_list(metadata);
@@ -136,17 +153,19 @@ void *my_malloc(size_t size) {
     return my_malloc(size);
   }
 
+
+  printf("best mata: %d\n", best_metadata->bin_size);
   // |ptr| is the beginning of the allocated object.
   //
   // ... | metadata | object | ...
   //     ^          ^
   //     metadata   ptr
-  void *ptr = metadata + 1;
-  size_t remaining_size = metadata->size - size;
-  metadata->size = size;
-  metadata->bin_size = difine_bin_from_size(&metadata->size);
+  void *ptr = best_metadata + 1;
+  size_t remaining_size = best_metadata->size - size;
+  best_metadata->size = size;
+  best_metadata->bin_size = define_bin_from_size(best_metadata->size);
   // Remove the free slot from the free list.
-  my_remove_from_free_list(metadata, prev, my_heap);
+  my_remove_from_free_list(best_metadata, best_prev, my_heap);
 
   if (remaining_size > sizeof(my_metadata_t)) {
     // Create a new metadata for the remaining free slot.
@@ -158,7 +177,7 @@ void *my_malloc(size_t size) {
     //                   size       remaining size
     my_metadata_t *new_metadata = (my_metadata_t *)((char *)ptr + size);
     new_metadata->size = remaining_size - sizeof(my_metadata_t);
-    new_metadata->bin_size = difine_bin_from_size(&new_metadata->size);
+    new_metadata->bin_size = define_bin_from_size(new_metadata->size);
     new_metadata->next = NULL;
     // Add the remaining free slot to the free list.
     my_add_to_free_list(new_metadata);
